@@ -2,8 +2,8 @@
 #
 # 用脚本而不是几十条 POST_BUILD，是为了让打包规则可读、可单独跑，
 # 也方便一个仓库出多个产物（ALXR Local / Remote）。
-if(NOT DEFINED FGB_SOURCE_DIR OR NOT DEFINED FGB_TARGET_FILE OR NOT DEFINED FGB_OUTPUT_DIR)
-    message(FATAL_ERROR "缺少 FGB_SOURCE_DIR / FGB_TARGET_FILE / FGB_OUTPUT_DIR")
+if(NOT DEFINED FGB_SOURCE_DIR OR NOT DEFINED FGB_OUTPUT_DIR)
+    message(FATAL_ERROR "缺少 FGB_SOURCE_DIR / FGB_OUTPUT_DIR")
 endif()
 
 file(GLOB_RECURSE manifests
@@ -30,7 +30,20 @@ foreach(manifest ${manifests})
 
     set(stage "${stage_root}/${dll_stem}")
     file(MAKE_DIRECTORY "${stage}")
-    file(COPY_FILE "${FGB_TARGET_FILE}" "${stage}/${dll}")
+    # 一个仓库可能出多个产物：按清单声明的 DLL 名在输出目录里找，找不到就是漏构建。
+    set(_built "${FGB_OUTPUT_DIR}/${dll}")
+    if(NOT EXISTS "${_built}")
+        foreach(_probe "${FGB_OUTPUT_DIR}/*/${dll}" "${FGB_SOURCE_DIR}/build/${dll}")
+            if(EXISTS "${_probe}")
+                set(_built "${_probe}")
+                break()
+            endif()
+        endforeach()
+    endif()
+    if(NOT EXISTS "${_built}")
+        message(FATAL_ERROR "找不到已构建的 ${dll}（target 输出名与清单 DllFileName 是否一致？）")
+    endif()
+    file(COPY_FILE "${_built}" "${stage}/${dll}")
     file(COPY_FILE "${manifest}" "${stage}/fgb-native.json")
     file(COPY_FILE "${FGB_SOURCE_DIR}/LICENSE" "${stage}/LICENSE")
     file(COPY_FILE "${FGB_SOURCE_DIR}/NOTICE" "${stage}/NOTICE")

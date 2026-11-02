@@ -21,21 +21,27 @@ function(fgb_add_module)
     endif()
 
     # 核心逻辑单独成 OBJECT 库：单测直接链接它，不用把 DLL 拉进来。
-    add_library(${M_NAME}-core OBJECT ${M_SOURCES})
-    target_link_libraries(${M_NAME}-core PRIVATE fgb::kit ${M_LINK_LIBRARIES})
-    target_include_directories(${M_NAME}-core PRIVATE
-        "${CMAKE_CURRENT_SOURCE_DIR}/src"
-        "${CMAKE_CURRENT_SOURCE_DIR}/include")
+    # 只有 main.cpp 的简单模块没有 SOURCES，这时不建空 OBJECT 库（CMake 会拒绝）。
+    set(M_OBJECTS "")
+    if(M_SOURCES)
+        add_library(${M_NAME}-core OBJECT ${M_SOURCES})
+        target_link_libraries(${M_NAME}-core PRIVATE fgb::kit ${M_LINK_LIBRARIES})
+        target_include_directories(${M_NAME}-core PRIVATE
+            "${CMAKE_CURRENT_SOURCE_DIR}/src"
+            "${CMAKE_CURRENT_SOURCE_DIR}/include")
+        if(MSVC)
+            target_compile_options(${M_NAME}-core PRIVATE /utf-8 /W4 /permissive-)
+        endif()
+        set(M_OBJECTS $<TARGET_OBJECTS:${M_NAME}-core>)
+    endif()
 
-    add_library(${M_NAME} MODULE ${M_MAIN} $<TARGET_OBJECTS:${M_NAME}-core>)
+    add_library(${M_NAME} MODULE ${M_MAIN} ${M_OBJECTS})
     target_link_libraries(${M_NAME} PRIVATE fgb::kit ${M_LINK_LIBRARIES})
     target_include_directories(${M_NAME} PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/src")
     set_target_properties(${M_NAME} PROPERTIES PREFIX "" OUTPUT_NAME "${M_NAME}")
 
     if(MSVC)
-        foreach(_target ${M_NAME}-core ${M_NAME})
-            target_compile_options(${_target} PRIVATE /utf-8 /W4 /permissive-)
-        endforeach()
+        target_compile_options(${M_NAME} PRIVATE /utf-8 /W4 /permissive-)
     endif()
 
     # 清单与图标随 DLL 落到输出目录，本地压 zip 或手工安装都能直接用。
@@ -56,7 +62,11 @@ function(fgb_add_module)
     foreach(_test ${M_TEST_SOURCES})
         get_filename_component(_stem "${_test}" NAME_WE)
         add_executable(${M_NAME}-${_stem} ${_test})
-        target_link_libraries(${M_NAME}-${_stem} PRIVATE fgb::kit ${M_NAME}-core)
+        if(TARGET ${M_NAME}-core)
+            target_link_libraries(${M_NAME}-${_stem} PRIVATE fgb::kit ${M_NAME}-core)
+        else()
+            target_link_libraries(${M_NAME}-${_stem} PRIVATE fgb::kit)
+        endif()
         target_include_directories(${M_NAME}-${_stem} PRIVATE
             "${CMAKE_CURRENT_SOURCE_DIR}/src"
             "${CMAKE_CURRENT_SOURCE_DIR}/tests"
@@ -87,13 +97,19 @@ function(fgb_add_module)
             VERBATIM)
     endif()
 
-    add_custom_target(package-modules
-        COMMAND "${CMAKE_COMMAND}"
-                "-DFGB_SOURCE_DIR=${CMAKE_CURRENT_SOURCE_DIR}"
-                "-DFGB_TARGET_FILE=$<TARGET_FILE:${M_NAME}>"
-                "-DFGB_OUTPUT_DIR=${CMAKE_BINARY_DIR}/Release"
-                -P "${FGB_KIT_CMAKE_DIR}/FgbPackageScript.cmake"
-        DEPENDS ${M_NAME}
-        COMMENT "按 module/**/fgb-native.json 产出发布 zip"
-        VERBATIM)
+    # 一个仓库可以有多个模块产物（ALXR Local / Remote）：package-modules 只建一次，
+    # 之后每次 fgb_add_module 都把自己挂上去。
+    set_property(DIRECTORY APPEND PROPERTY FGB_MODULE_TARGETS ${M_NAME})
+    get_property(_already DIRECTORY PROPERTY FGB_PACKAGE_CREATED)
+    if(NOT _already)
+        set_property(DIRECTORY PROPERTY FGB_PACKAGE_CREATED TRUE)
+        add_custom_target(package-modules
+            COMMAND "${CMAKE_COMMAND}"
+                    "-DFGB_SOURCE_DIR=${CMAKE_CURRENT_SOURCE_DIR}"
+                    "-DFGB_OUTPUT_DIR=$<TARGET_FILE_DIR:${M_NAME}>"
+                    -P "${FGB_KIT_CMAKE_DIR}/FgbPackageScript.cmake"
+            COMMENT "按 module/**/fgb-native.json 产出发布 zip"
+            VERBATIM)
+    endif()
+    add_dependencies(package-modules ${M_NAME})
 endfunction()
