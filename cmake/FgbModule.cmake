@@ -71,7 +71,11 @@ function(fgb_add_module)
         # 走真实 ABI：LoadLibrary 后按宿主顺序调用。需要空闲端口，所以不挂进 ctest。
         add_executable(${M_NAME}-abi-smoke ${M_SMOKE_SOURCE})
         target_link_libraries(${M_NAME}-abi-smoke PRIVATE fgb::kit)
-        target_include_directories(${M_NAME}-abi-smoke PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/tests")
+        # 冒烟程序常会复用模块自己的头（协议常量、字段表），所以源码目录也要给到。
+        target_include_directories(${M_NAME}-abi-smoke PRIVATE
+            "${CMAKE_CURRENT_SOURCE_DIR}/tests"
+            "${CMAKE_CURRENT_SOURCE_DIR}/src"
+            "${CMAKE_CURRENT_SOURCE_DIR}/include")
         if(MSVC)
             target_compile_options(${M_NAME}-abi-smoke PRIVATE /utf-8 /W4 /permissive-)
         endif()

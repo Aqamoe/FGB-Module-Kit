@@ -135,8 +135,12 @@ const manifestPath = join(target, 'module/fgb-native.json');
 if (flag('module') && existsSync(manifestPath)) {
   const manifest = JSON.parse(readFileSync(manifestPath, 'utf8'));
   const problems = [];
-  if (!/^com\.fgbbridge\.[a-z0-9][a-z0-9-]*$/.test(manifest.ModuleId || '')) {
-    problems.push(`ModuleId 不符合 com.fgbbridge.<slug>：${manifest.ModuleId}`);
+  // 新模块统一 com.fgbbridge.<slug>；com.picogaze.pico-connect-face 是已有用户的遗留 ID，
+  // 换掉会让已安装用户收不到升级，所以这里作为唯一豁免记录在案。
+  const LEGACY_MODULE_IDS = new Set(['com.picogaze.pico-connect-face']);
+  const moduleId = manifest.ModuleId || '';
+  if (!LEGACY_MODULE_IDS.has(moduleId) && !/^com\.fgbbridge\.[a-z0-9][a-z0-9-]*$/.test(moduleId)) {
+    problems.push(`ModuleId 不符合 com.fgbbridge.<slug>：${moduleId}`);
   }
   if (manifest.AbiVersion !== 2) problems.push(`AbiVersion 必须是 2：${manifest.AbiVersion}`);
   if (!/^\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?$/.test(manifest.Version || '')) {
