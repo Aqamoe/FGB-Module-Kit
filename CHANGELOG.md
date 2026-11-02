@@ -1,7 +1,8 @@
-# 更新日志
-
-遵循语义化版本。模块仓库通过 `kit.lock.json` + 复用工作流 tag 固定到这里某一个版本，
-所以破坏性变更必须升 major 并同步所有模块仓库。
+## [0.2.2]
+### 修复
+- `testing::HostMock::MakeParams` 的 `module_dir` 指向调用期临时量，返回后即悬垂：模块在 `Start` 里读
+  `params.module_dir` 会拿到随机字节，表现为冒烟测试偶发崩溃或 `ConfigIni` 抛 codecvt 异常；
+  现在先把目录落到成员再取 `c_str()`。
 
 ## [0.2.0]
 ### 新增

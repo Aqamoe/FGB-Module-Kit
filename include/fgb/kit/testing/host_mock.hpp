@@ -43,13 +43,16 @@ public:
 
     FgbInitParams MakeParams(const std::string& module_dir = ".", std::uint32_t tick_hz = 90,
                              const char* host_version = "1.0.8") {
+        // 先把目录存进成员，再让 params_.module_dir 指向它：
+        // 直接取实参 c_str() 会在调用返回后悬垂（默认实参是临时 std::string），
+        // 表现为模块读到随机字节、ConfigIni 抛 codecvt 异常，看起来像模块自己的崩溃。
+        module_dir_copy_ = module_dir;
         std::memset(&params_, 0, sizeof(params_));
         params_.struct_size = sizeof(FgbInitParams);
         params_.abi_version = FGB_MODULE_ABI_V2;
         params_.tick_hz = tick_hz;
-        params_.module_dir = module_dir.c_str();
+        params_.module_dir = module_dir_copy_.c_str();
         params_.host_version = host_version;
-        module_dir_copy_ = module_dir;
         return params_;
     }
 
