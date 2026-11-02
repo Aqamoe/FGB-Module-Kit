@@ -63,6 +63,8 @@ SDK 的文档要求「固定在 tag 上，不要跟随 main」。这里的做法
 ## 版本约定
 
 - Kit 用 `vX.Y.Z` tag；模块通过 `kit.lock.json` 固定 tag 与归档哈希。
+- 模块仓库里的 `uses: Aqamoe/FGB-Module-Kit/.github/workflows/*.yml@vX.Y.Z` **与 `kit.lock.json` 指向同一个 tag**，
+  这样「CI 用的规则」和「编译用的代码」永远同版本；升级 Kit 时两处一起改（由 sync-kit 脚本开 PR）。
 - 破坏性变更（改 `ShapeTable` 语义、改脚手架接口）必须升 major，并同步所有模块仓库。
 - `shape_names.hpp` 跟随 SDK：升级 SDK 后运行
   `node tools/gen_shape_names.mjs --sdk=<SDK 根目录>`，CI 用 `--check` 挡住漂移。

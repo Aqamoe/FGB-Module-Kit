@@ -84,6 +84,11 @@ public:
         return value != nullptr ? value->AsNumber(fallback) : fallback;
     }
 
+    std::string_view TextOr(std::string_view name, std::string_view fallback = {}) const {
+        const JsonValue* value = FindInsensitive(name);
+        return value != nullptr && value->Kind() == JsonKind::String ? value->AsText() : fallback;
+    }
+
     bool BoolOr(std::string_view name, bool fallback) const {
         const JsonValue* value = FindInsensitive(name);
         return value != nullptr ? value->AsBool(fallback) : fallback;

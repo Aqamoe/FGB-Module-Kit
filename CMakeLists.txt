@@ -12,6 +12,10 @@ endif()
 list(APPEND CMAKE_MODULE_PATH "${CMAKE_CURRENT_SOURCE_DIR}/cmake")
 include(fgb_dependency)
 
+# 让模块能定位 Kit 的 cmake 脚本目录（打包脚本要用绝对路径引用）。
+set(FGB_KIT_CMAKE_DIR "${CMAKE_CURRENT_SOURCE_DIR}/cmake" CACHE PATH "Kit 的 cmake 脚本目录" FORCE)
+list(APPEND CMAKE_MODULE_PATH "${FGB_KIT_CMAKE_DIR}")
+
 add_library(fgb_kit INTERFACE)
 add_library(fgb::kit ALIAS fgb_kit)
 target_include_directories(fgb_kit INTERFACE "${CMAKE_CURRENT_SOURCE_DIR}/include")

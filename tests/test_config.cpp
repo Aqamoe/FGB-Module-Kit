@@ -1,4 +1,4 @@
-#include "check.hpp"
+#include "fgb/kit/testing/check.hpp"
 #include "fgb/kit/config.hpp"
 
 #include <filesystem>

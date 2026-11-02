@@ -1,0 +1,88 @@
+name: sdk-sync
+
+# 模块仓库通过 uses 调用。每周查一次 FaceGaze Bridge 的新 Release，
+# 有新版就改 sdk.lock.json 并开 PR——由 PR 自己的 CI 决定这版 SDK 能不能用，
+# 而不是让 19 个仓库在主分支上同时静默变红。
+
+on:
+  workflow_call:
+    inputs:
+      branch_prefix:
+        description: PR 分支前缀
+        type: string
+        default: chore/sdk
+      weekly:
+        description: 由调用方的 schedule 触发时保持 true
+        type: boolean
+        default: true
+
+permissions:
+  contents: write
+  pull-requests: write
+
+jobs:
+  sync:
+    name: 检查并升级 SDK
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+
+      - name: 取同步脚本
+        run: |
+          curl -fsSL -o sync-sdk.mjs \
+            https://raw.githubusercontent.com/Aqamoe/FGB-Module-Kit/v0.1.0/tools/sync-sdk.mjs
+
+      - name: 检查新版
+        id: check
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set +e
+          node sync-sdk.mjs --check --json
+          code=$?
+          set -e
+          case "$code" in
+            0) echo "updated=false" >> "$GITHUB_OUTPUT" ;;
+            3) echo "updated=true" >> "$GITHUB_OUTPUT" ;;
+            *) echo "查询 SDK Release 失败（退出码 $code）" >&2; exit "$code" ;;
+          esac
+          node -e "console.log(JSON.stringify(JSON.parse(require('fs').readFileSync('sdk-update.json','utf8'))))" || true
+
+      - name: 写锁文件并开 PR
+        if: steps.check.outputs.updated == 'true'
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          node sync-sdk.mjs --write
+          version="$(node -p "JSON.parse(require('fs').readFileSync('sdk.lock.json','utf8')).version")"
+          branch="${{ inputs.branch_prefix }}-${version}"
+
+          git checkout -B "$branch"
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add sdk.lock.json
+          git commit -m "chore: 升级 FaceGaze Bridge SDK 到 ${version}"
+
+          if git ls-remote --exit-code origin "$branch" >/dev/null 2>&1; then
+            git push -f origin "$branch"
+            echo "已更新分支 $branch"
+            exit 0
+          fi
+          git push -u origin "$branch"
+
+          gh pr create --title "chore: 升级 SDK 到 ${version}" --body "$(cat <<'EOF'
+FaceGaze Bridge 发布了新的 SDK，本 PR 把 `sdk.lock.json` 指向新版。
+
+- 合入前请确认本 PR 的 CI（构建 / 单测 / 打包 / 审计）全绿；
+- 若新 SDK 改了 ABI 或行为，请对照 `docs/native-module-guide.md` 调整模块；
+- 关闭本 PR 即可保持现状，锁文件不会影响主分支构建。
+EOF
+)"

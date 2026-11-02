@@ -1,4 +1,4 @@
-#include "check.hpp"
+#include "fgb/kit/testing/check.hpp"
 #include "fgb/kit/module.hpp"
 #include "fgb/kit/testing/host_mock.hpp"
 

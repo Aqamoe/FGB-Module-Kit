@@ -98,6 +98,12 @@ inline constexpr std::array<std::string_view, kArkitCount> kArkitNames = {
 
 using ArkitWeights = std::array<float, kArkitCount>;
 
+// 取值用具名函数而不是 lambda：MSVC 14.36 在「捕获数组 + lambda 内下标」上会
+// 触发内部编译器错误（C1001），具名函数既绕开它也更省代码。
+inline float ArkitWeight(const ArkitWeights& weights, Arkit name) {
+    return weights[static_cast<std::size_t>(name)];
+}
+
 inline std::string NormalizeShapeName(std::string_view raw) {
     std::string out;
     out.reserve(raw.size());
@@ -110,8 +116,6 @@ inline std::string NormalizeShapeName(std::string_view raw) {
     return out;
 }
 
-// 归一后的名字 → ARKit 槽位。同时收录几种常见的左右缩写：
-//   browDown_L / browDownL / BrowDownLeft / browdownleft 都落到 BrowDownLeft。
 inline const std::map<std::string, Arkit>& ArkitAliasTable() {
     static const std::map<std::string, Arkit> table = [] {
         std::map<std::string, Arkit> entries;
@@ -143,6 +147,24 @@ inline std::optional<Arkit> ArkitFromName(std::string_view raw) {
     }
     return found->second;
 }
+
+// 左右互换。有些来源按「镜像视角」命名（iFacialMocap 是典型），
+// 在写入通用表之前先归一到我们的左右口径，映射表本身保持一份。
+inline Arkit MirrorLeftRight(Arkit slot) {
+    const std::string_view name = kArkitNames[static_cast<std::size_t>(slot)];
+    if (name.ends_with("Left")) {
+        const auto mirror = ArkitFromName(std::string{name.substr(0, name.size() - 4)} + "Right");
+        return mirror.value_or(slot);
+    }
+    if (name.ends_with("Right")) {
+        const auto mirror = ArkitFromName(std::string{name.substr(0, name.size() - 5)} + "Left");
+        return mirror.value_or(slot);
+    }
+    return slot;
+}
+
+// 归一后的名字 → ARKit 槽位。同时收录几种常见的左右缩写：
+//   browDown_L / browDownL / BrowDownLeft / browdownleft 都落到 BrowDownLeft。
 
 // NaN/Inf 一律当 0，越界裁剪到 [0,1]；上游偶发脏值不应该污染整帧。
 inline float CleanUnit(float value) {
@@ -281,24 +303,21 @@ struct ArkitEyeOptions {
 // 填双眼的睁眼度与方向，返回这一帧贡献的属性位。
 inline std::uint64_t ApplyArkitEyes(const ArkitWeights& weights, FgbFrameSlot* slot,
                                    const ArkitEyeOptions& options = {}) {
-    const auto w = [&weights](Arkit slot_name) {
-        return weights[static_cast<std::size_t>(slot_name)];
-    };
 
-    const float blink_left = w(Arkit::EyeBlinkLeft);
-    const float blink_right = w(Arkit::EyeBlinkRight);
+    const float blink_left = ArkitWeight(weights, Arkit::EyeBlinkLeft);
+    const float blink_right = ArkitWeight(weights, Arkit::EyeBlinkRight);
     float open_left = 1.0f - blink_left;
     float open_right = 1.0f - blink_right;
     if (options.include_squint) {
-        open_left = 1.0f - Clamp01(blink_left + blink_left * w(Arkit::EyeSquintLeft));
-        open_right = 1.0f - Clamp01(blink_right + blink_right * w(Arkit::EyeSquintRight));
+        open_left = 1.0f - Clamp01(blink_left + blink_left * ArkitWeight(weights, Arkit::EyeSquintLeft));
+        open_right = 1.0f - Clamp01(blink_right + blink_right * ArkitWeight(weights, Arkit::EyeSquintRight));
     }
 
     // 左眼：向内看是 +x 还是 -x 由各来源约定决定，这里沿用 VRCFT 上游模块的口径。
-    const float left_x = w(Arkit::EyeLookInLeft) - w(Arkit::EyeLookOutLeft);
-    const float right_x = w(Arkit::EyeLookOutRight) - w(Arkit::EyeLookInRight);
-    const float left_y = w(Arkit::EyeLookUpLeft) - w(Arkit::EyeLookDownLeft);
-    const float right_y = w(Arkit::EyeLookUpRight) - w(Arkit::EyeLookDownRight);
+    const float left_x = ArkitWeight(weights, Arkit::EyeLookInLeft) - ArkitWeight(weights, Arkit::EyeLookOutLeft);
+    const float right_x = ArkitWeight(weights, Arkit::EyeLookOutRight) - ArkitWeight(weights, Arkit::EyeLookInRight);
+    const float left_y = ArkitWeight(weights, Arkit::EyeLookUpLeft) - ArkitWeight(weights, Arkit::EyeLookDownLeft);
+    const float right_y = ArkitWeight(weights, Arkit::EyeLookUpRight) - ArkitWeight(weights, Arkit::EyeLookDownRight);
 
     slot->left_eye.openness = Clamp01(open_left);
     slot->left_eye.openness_confidence = 1.0f;

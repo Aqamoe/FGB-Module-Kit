@@ -1,6 +1,6 @@
 name: module-ci
 
-# 各模块仓库通过 `uses: Aqamoe/FGB-Module-Kit/.github/workflows/module-ci.yml@v1` 调用。
+# 各模块仓库通过 `uses: Aqamoe/FGB-Module-Kit/.github/workflows/module-ci.yml@v0.1.0` 调用。
 # 构建口径统一在这里：拉锁定的 SDK/Kit → 编译 → 单测 → 打包 → 校验包 → 发 Release。
 
 on:
@@ -66,7 +66,7 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           Invoke-WebRequest -UseBasicParsing `
-            -Uri "https://raw.githubusercontent.com/Aqamoe/FGB-Module-Kit/v1/tools/sync-sdk.mjs" `
+            -Uri "https://raw.githubusercontent.com/Aqamoe/FGB-Module-Kit/v0.1.0/tools/sync-sdk.mjs" `
             -OutFile sync-sdk-probe.mjs
           node sync-sdk-probe.mjs --write
           Get-Content sdk.lock.json

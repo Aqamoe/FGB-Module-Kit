@@ -20,7 +20,9 @@ function(fgb_fetch_from_lock dep_name lock_path)
     string(JSON _sha GET "${_lock_json}" sha256)
 
     if(_url STREQUAL "" OR _sha STREQUAL "")
-        message(FATAL_ERROR "锁文件字段不完整：${lock_path}")
+        message(FATAL_ERROR
+            "锁文件 ${lock_path} 的 url/sha256 还没填写（依赖仓库尚未发布？）。"
+            "本地开发可以用 -DFGB_KIT_DIR / -DFGB_SDK_DIR 直接指向已解压的源码目录。")
     endif()
 
     set(${dep_name}_VERSION "${_ver}" PARENT_SCOPE)
