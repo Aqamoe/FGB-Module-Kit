@@ -54,10 +54,11 @@ jobs:
             if ($json.Version -notmatch '^\d+\.\d+\.\d+$') { throw "$($file.Name) 的 Version 不是 semver" }
             $versions += $json.Version
           }
-          $unique = $versions | Sort-Object -Unique
+          # @() 不能省：单元素时 Sort-Object 返回标量字符串，[0] 会取到首字符而不是整串。
+          $unique = @($versions | Sort-Object -Unique)
           if ($unique.Count -ne 1) { throw "同一仓库内清单版本不一致：$($unique -join ', ')" }
-          "version=$($unique[0])" >> $env:GITHUB_OUTPUT
-          "products=$($files.Count)" >> $env:GITHUB_OUTPUT
+          Add-Content -Path $env:GITHUB_OUTPUT -Encoding utf8 -Value "version=$($unique[0])"
+          Add-Content -Path $env:GITHUB_OUTPUT -Encoding utf8 -Value "products=$($files.Count)"
 
       - name: 前沿探测：解析最新 SDK
         if: inputs.floating_sdk
