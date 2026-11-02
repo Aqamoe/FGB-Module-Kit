@@ -120,7 +120,6 @@ const REQUIRED_MODULE = [
   'sdk.lock.json',
   'kit.lock.json',
   'CMakeLists.txt',
-  'module/fgb-native.json',
   '.github/workflows/ci.yml',
 ];
 const required = flag('module') ? REQUIRED_MODULE : REQUIRED_BASE;
@@ -130,10 +129,32 @@ for (const name of required) {
   }
 }
 
-// ---- 清单一致性 ----
-const manifestPath = join(target, 'module/fgb-native.json');
-if (flag('module') && existsSync(manifestPath)) {
-  const manifest = JSON.parse(readFileSync(manifestPath, 'utf8'));
+// ---- 清单一致性（一个仓库可能有多个产物清单）----
+// 遍历 module/**/fgb-native.json，逐份按同一套规则校验：多产物仓库不允许
+// 出现「一半过检一半没检查」，也不允许两个产物共用同一个 ModuleId 或 DLL 名。
+const manifestPaths = files
+  .map((f) => relative(target, f).replace(/\\/g, '/'))
+  .filter((rel) => rel.startsWith('module/') && rel.endsWith('fgb-native.json'))
+  .sort();
+if (flag('module') && manifestPaths.length === 0) {
+  findings.push({
+    rule: 'missing-file',
+    file: 'module/**/fgb-native.json',
+    why: '找不到任何模块清单',
+  });
+}
+const packageIds = [];
+const packageDlls = [];
+for (const rel of manifestPaths) {
+  let manifest;
+  try {
+    manifest = JSON.parse(readFileSync(join(target, rel), 'utf8'));
+  } catch (error) {
+    findings.push({ rule: 'manifest', file: rel, why: `清单解析失败：${error.message}` });
+    continue;
+  }
+  packageIds.push(manifest.ModuleId);
+  packageDlls.push(manifest.DllFileName);
   const problems = [];
   // 新模块统一 com.fgbbridge.<slug>；com.picogaze.pico-connect-face 是已有用户的遗留 ID，
   // 换掉会让已安装用户收不到升级，所以这里作为唯一豁免记录在案。
@@ -146,7 +167,7 @@ if (flag('module') && existsSync(manifestPath)) {
   if (!/^\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?$/.test(manifest.Version || '')) {
     problems.push(`Version 不是 semver：${manifest.Version}`);
   }
-  if (!/^[a-z0-9-]+\.dll$/.test(manifest.DllFileName || '')) {
+  if (!/^[a-z0-9][a-z0-9.-]*\.dll$/.test(manifest.DllFileName || '')) {
     problems.push(`DllFileName 必须是小写 kebab-case 的 .dll：${manifest.DllFileName}`);
   }
   const allowed = new Set(['expression', 'eyes', 'gaze', 'head']);
@@ -160,17 +181,27 @@ if (flag('module') && existsSync(manifestPath)) {
     problems.push(`ModuleIcon 不能越出模块目录：${manifest.ModuleIcon}`);
   }
   const tag = option('tag', '');
+  // 多产物仓库的 tag 必须与每一份清单的版本一致，否则会发出「一半新一半旧」的包。
   if (tag && `v${manifest.Version}` !== tag) {
     problems.push(`tag ${tag} 与清单 Version ${manifest.Version} 不一致`);
   }
   for (const problem of problems) {
-    findings.push({ rule: 'manifest', file: 'module/fgb-native.json', why: problem });
+    findings.push({ rule: 'manifest', file: rel, why: problem });
   }
-
-  // 上游归因：NOTICE 里必须出现所参考的项目名
+}
+if (manifestPaths.length > 1) {
+  if (new Set(packageIds).size !== packageIds.length) {
+    findings.push({ rule: 'manifest', file: 'module/', why: '同一仓库内出现重复 ModuleId' });
+  }
+  if (new Set(packageDlls).size !== packageDlls.length) {
+    findings.push({ rule: 'manifest', file: 'module/', why: '同一仓库内出现重复 DllFileName' });
+  }
+}
+// 上游归因：NOTICE 里必须出现所参考的项目名
+if (manifestPaths.length > 0 && existsSync(join(target, 'NOTICE'))) {
   const notice = readFileSync(join(target, 'NOTICE'), 'utf8');
-  if (!/upstream|参考|informed|implements/i.test(notice) && manifest.Upstream) {
-    findings.push({ rule: 'notice', file: 'NOTICE', why: '声明了 Upstream 但 NOTICE 没有归因' });
+  if (!/upstream|参考|informed|implements/i.test(notice)) {
+    findings.push({ rule: 'notice', file: 'NOTICE', why: '未发现上游归因说明' });
   }
 }
 
@@ -191,11 +222,15 @@ if (entryPath) {
     if (!(entry.requires?.arch || []).includes('x64')) problems.push('requires.arch 必须含 x64');
     if (!entry.assetPattern || !entry.entry) problems.push('缺少 assetPattern 或 entry');
     if (!entry.i18n?.en?.summary) problems.push('缺少 i18n.en（公开仓库需要英文摘要）');
-    if (flag('module') && existsSync(manifestPath)) {
-      const packageManifest = JSON.parse(readFileSync(manifestPath, 'utf8'));
-      if (entry.id !== packageManifest.ModuleId) problems.push('条目 id 与包内 ModuleId 不一致');
-      if (entry.entry !== packageManifest.DllFileName) {
-        problems.push('条目 entry 与包内 DllFileName 不一致');
+    if (flag('module') && manifestPaths.length > 0) {
+      const packages = manifestPaths.map((rel) =>
+        JSON.parse(readFileSync(join(target, rel), 'utf8')),
+      );
+      if (!packages.some((p) => p.ModuleId === entry.id)) {
+        problems.push(`条目 id ${entry.id} 在包内清单里不存在`);
+      }
+      if (!packages.some((p) => p.DllFileName === entry.entry)) {
+        problems.push(`条目 entry ${entry.entry} 与包内 DllFileName 不一致`);
       }
     }
     for (const problem of problems) {
