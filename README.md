@@ -17,6 +17,7 @@ Shared toolchain for FaceGaze Bridge native modules: host plumbing, ARKit → Un
 | `include/fgb/kit/host.hpp` | `Host`（日志 / 状态上报 / 形状下标）与 `ShapeTable`（按名解析、max 合并写入） |
 | `include/fgb/kit/arkit.hpp` | ARKit 52 系数、跨厂商名字归一、到 Unified Expressions 的通用映射、眼睛推导 |
 | `include/fgb/kit/udp.hpp` | Winsock UDP 接收端：后台线程收包、有界队列、断流统计、发送回包 |
+| `include/fgb/kit/osc.hpp` | OSC 1.0 只读解析：单消息与 `#bundle`、4 字节对齐、`i/f/d/s/c/b/T/F/N` 参数、深度与长度上限 |
 | `include/fgb/kit/json.hpp` | 只读 JSON 解析器，带深度 / 节点数 / 长度上限（上游负载是不可信输入） |
 | `include/fgb/kit/config.hpp` | 模块目录下的 `config.ini` 读写，未知键会被记录 |
 | `include/fgb/kit/module.hpp` | ABI 生命周期脚手架 + `FGB_KIT_EXPORT` 宏 + `Staleness` 断流监控 |

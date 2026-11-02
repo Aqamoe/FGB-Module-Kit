@@ -1,4 +1,4 @@
-foreach(suite json arkit config udp module)
+foreach(suite json arkit config udp module osc)
     add_executable(kit-${suite}-tests test_${suite}.cpp)
     target_link_libraries(kit-${suite}-tests PRIVATE fgb::kit)
     target_include_directories(kit-${suite}-tests PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}")
