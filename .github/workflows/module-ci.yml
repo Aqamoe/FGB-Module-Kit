@@ -1,0 +1,165 @@
+name: module-ci
+
+# 各模块仓库通过 `uses: Aqamoe/FGB-Module-Kit/.github/workflows/module-ci.yml@v1` 调用。
+# 构建口径统一在这里：拉锁定的 SDK/Kit → 编译 → 单测 → 打包 → 校验包 → 发 Release。
+
+on:
+  workflow_call:
+    inputs:
+      cmake_args:
+        description: 额外的 cmake 配置参数
+        type: string
+        default: ""
+      run_smoke:
+        description: 是否执行 smoke-test 目标（需要本地端口的模块不要开）
+        type: boolean
+        default: false
+      floating_sdk:
+        description: 用最新 SDK 做前沿探测，不发布（sdk-sync 的夜间任务用）
+        type: boolean
+        default: false
+    secrets:
+      REGISTRY_DISPATCH_TOKEN:
+        required: false
+
+permissions:
+  contents: write
+
+concurrency:
+  group: module-ci-${{ github.ref }}-${{ inputs.floating_sdk }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    name: 构建 / 测试 / 打包
+    runs-on: windows-2022
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+
+      - name: 读取模块清单
+        id: manifest
+        shell: pwsh
+        run: |
+          $files = Get-ChildItem -Path module -Filter fgb-native.json -Recurse -ErrorAction SilentlyContinue
+          if (-not $files) { throw "module/ 下找不到 fgb-native.json" }
+          $versions = @()
+          foreach ($file in $files) {
+            $json = Get-Content $file.FullName -Raw | ConvertFrom-Json
+            if ($json.AbiVersion -ne 2) { throw "$($file.Name) 的 AbiVersion 不是 2" }
+            if ($json.Version -notmatch '^\d+\.\d+\.\d+$') { throw "$($file.Name) 的 Version 不是 semver" }
+            $versions += $json.Version
+          }
+          $unique = $versions | Sort-Object -Unique
+          if ($unique.Count -ne 1) { throw "同一仓库内清单版本不一致：$($unique -join ', ')" }
+          "version=$($unique[0])" >> $env:GITHUB_OUTPUT
+          "products=$($files.Count)" >> $env:GITHUB_OUTPUT
+
+      - name: 前沿探测：解析最新 SDK
+        if: inputs.floating_sdk
+        shell: pwsh
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          Invoke-WebRequest -UseBasicParsing `
+            -Uri "https://raw.githubusercontent.com/Aqamoe/FGB-Module-Kit/v1/tools/sync-sdk.mjs" `
+            -OutFile sync-sdk-probe.mjs
+          node sync-sdk-probe.mjs --write
+          Get-Content sdk.lock.json
+
+      - name: 配置
+        run: cmake -S . -B build -G "Visual Studio 17 2022" -A x64 ${{ inputs.cmake_args }}
+
+      - name: 构建
+        run: cmake --build build --config Release --parallel
+
+      - name: 单元测试
+        run: ctest --test-dir build -C Release --output-on-failure
+
+      - name: ABI 冒烟
+        if: inputs.run_smoke
+        run: cmake --build build --config Release --target smoke-test
+
+      - name: 打包
+        run: cmake --build build --config Release --target package-modules
+
+      - name: 校验发布包
+        shell: pwsh
+        run: |
+          Add-Type -AssemblyName System.IO.Compression.FileSystem
+          $zips = @(Get-ChildItem "build/Release/*.zip" -ErrorAction SilentlyContinue)
+          if ($zips.Count -eq 0) { throw "没有产出 zip" }
+          $expected = [int]"${{ steps.manifest.outputs.products }}"
+          if ($zips.Count -ne $expected) { throw "zip 数量 $($zips.Count) 与清单数量 $expected 不符" }
+          foreach ($zip in $zips) {
+            $archive = [IO.Compression.ZipFile]::OpenRead((Resolve-Path $zip))
+            try {
+              $names = @($archive.Entries | ForEach-Object { $_.FullName })
+            } finally { $archive.Dispose() }
+            foreach ($required in @('fgb-native.json')) {
+              if ($names -notcontains $required) { throw "$($zip.Name) 缺少 $required" }
+            }
+            $dll = @($names | Where-Object { $_ -like '*.dll' })
+            if ($dll.Count -eq 0) { throw "$($zip.Name) 里没有 DLL" }
+            Write-Host "ok $($zip.Name) -> $($dll -join ', ')"
+          }
+
+      - name: 发布前审计
+        shell: pwsh
+        run: |
+          $audit = "build/_deps/fgb_kit-src/tools/audit.mjs"
+          if (-not (Test-Path $audit)) { throw "找不到 Kit 的审计脚本：$audit" }
+          $tagArg = @()
+          if ("${{ github.ref_name }}" -like "v*") { $tagArg = @("--tag=${{ github.ref_name }}") }
+          node $audit --module --dir . @tagArg
+
+      - uses: actions/upload-artifact@v4
+        if: ${{ !inputs.floating_sdk }}
+        with:
+          name: ${{ github.event.repository.name }}-${{ steps.manifest.outputs.version }}
+          path: build/Release/*.zip
+          if-no-files-found: error
+
+      - name: 生成校验和
+        if: startsWith(github.ref, 'refs/tags/v') && !inputs.floating_sdk
+        shell: pwsh
+        run: |
+          Get-ChildItem "build/Release/*.zip" | ForEach-Object {
+            $hash = (Get-FileHash $_.FullName -Algorithm SHA256).Hash.ToLower()
+            "$hash  $($_.Name)"
+          } | Set-Content -Encoding utf8NoBOM build/Release/SHA256SUMS.txt
+          Get-Content build/Release/SHA256SUMS.txt
+
+      - name: 发布 GitHub Release
+        if: startsWith(github.ref, 'refs/tags/v') && !inputs.floating_sdk
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $tag = "${{ github.ref_name }}"
+          $version = "${{ steps.manifest.outputs.version }}"
+          if ($tag -ne "v$version") { throw "tag $tag 与清单版本 v$version 不一致" }
+          $assets = @(Get-ChildItem "build/Release/*.zip" | ForEach-Object { $_.FullName }) +
+                    "build/Release/SHA256SUMS.txt"
+          gh release view $tag *> $null
+          if ($LASTEXITCODE -eq 0) {
+            gh release upload $tag $assets --clobber
+          } else {
+            gh release create $tag $assets --title $tag --generate-notes
+          }
+
+      - name: 通知模块库
+        if: startsWith(github.ref, 'refs/tags/v') && !inputs.floating_sdk
+        shell: pwsh
+        env:
+          DISPATCH_TOKEN: ${{ secrets.REGISTRY_DISPATCH_TOKEN }}
+        run: |
+          if (-not $env:DISPATCH_TOKEN) {
+            Write-Host "未配置 REGISTRY_DISPATCH_TOKEN，等模块库的定时聚合（每 6 小时）"
+            exit 0
+          }
+          gh api repos/Aqamoe/fgb-registry/dispatches -f event_type=module-released -H "Authorization: token $env:DISPATCH_TOKEN"

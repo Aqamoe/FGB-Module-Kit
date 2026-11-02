@@ -1,0 +1,16 @@
+FGB Module Kit
+Copyright 2026 Aqamoe (光水)
+
+This product includes a copy of fgb_module_api.h from FaceGaze Bridge
+(https://github.com/Aqamoe/FaceGaze-Bridge), licensed under the Apache
+License, Version 2.0. The ABI header is resolved at build time from the
+FaceGaze Bridge release pinned in sdk.lock.json; this repository does not
+contain a copy of it.
+
+include/fgb/kit/shape_names.hpp is generated from the SDK's Unity sample
+(FaceGazeShapeNames.cs) by tools/gen_shape_names.mjs and stays in sync with
+the pinned SDK version.
+
+FaceGaze Bridge, PICO, Meta, HTC VIVE, Varjo, HP Omnicept, Pimax, Bigscreen,
+PlayStation and Steam are trademarks of their respective owners. Mention of a
+product here does not imply affiliation with or endorsement by its owner.
