@@ -1,8 +1,8 @@
 name: sdk-sync
 
 # 模块仓库通过 uses 调用。每周查一次 FaceGaze Bridge 的新 Release，
-# 有新版就改 sdk.lock.json 并开 PR——由 PR 自己的 CI 决定这版 SDK 能不能用，
-# 而不是让 19 个仓库在主分支上同时静默变红。
+# 有新版才改 sdk.lock.json、开 PR 并显式派发 CI 构建；
+# 版本未变时全部跳过，不让 19 个仓库反复跑无意义的同步与构建。
 
 on:
   workflow_call:
@@ -19,6 +19,7 @@ on:
 permissions:
   contents: write
   pull-requests: write
+  actions: write
 
 jobs:
   sync:
@@ -37,7 +38,7 @@ jobs:
       - name: 取同步脚本
         run: |
           curl -fsSL -o sync-sdk.mjs \
-            https://raw.githubusercontent.com/Aqamoe/FGB-Module-Kit/v0.4.4/tools/sync-sdk.mjs
+            https://raw.githubusercontent.com/Aqamoe/FGB-Module-Kit/v0.4.5/tools/sync-sdk.mjs
 
       - name: 检查新版
         id: check
@@ -60,6 +61,7 @@ jobs:
         run: echo "SDK 版本未变化，跳过同步、开 PR 与构建"
 
       - name: 写锁文件并开 PR
+        id: prepare
         if: steps.check.outputs.updated == 'true'
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -94,8 +96,31 @@ jobs:
           pr="$(gh pr list --repo "$GITHUB_REPOSITORY" --head "$branch" --state open --json number --jq '.[0].number // empty')"
           if [ -n "$pr" ]; then
             echo "PR #$pr 已存在：$GITHUB_SERVER_URL/$GITHUB_REPOSITORY/pull/$pr"
-            exit 0
+          else
+            body=$(printf '%s\n' "FaceGaze Bridge 发布了新的 SDK，本 PR 把 sdk.lock.json 指向新版。" "" "- 合入前请确认本 PR 的 CI（构建 / 单测 / 打包 / 审计）全绿。" "- 若新 SDK 改了 ABI 或行为，请对照 docs/native-module-guide.md 调整模块。" "- 关闭本 PR 即可保持现状，锁文件不会影响主分支构建。")
+            gh pr create --head "$branch" --title "chore: 升级 SDK 到 ${version}" --body "$body"
           fi
 
-          body=$(printf '%s\n' "FaceGaze Bridge 发布了新的 SDK，本 PR 把 sdk.lock.json 指向新版。" "" "- 合入前请确认本 PR 的 CI（构建 / 单测 / 打包 / 审计）全绿。" "- 若新 SDK 改了 ABI 或行为，请对照 docs/native-module-guide.md 调整模块。" "- 关闭本 PR 即可保持现状，锁文件不会影响主分支构建。")
-          gh pr create --head "$branch" --title "chore: 升级 SDK 到 ${version}" --body "$body"
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+          echo "branch=$branch" >> "$GITHUB_OUTPUT"
+
+      - name: 触发并等待模块 CI 构建
+        if: steps.check.outputs.updated == 'true'
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          branch="${{ steps.prepare.outputs.branch }}"
+          before="$(gh run list --repo "$GITHUB_REPOSITORY" --workflow ci --branch "$branch" --limit 1 --json databaseId --jq '.[0].databaseId // empty')"
+          gh workflow run ci --repo "$GITHUB_REPOSITORY" --ref "$branch"
+
+          ci_id=""
+          for i in $(seq 1 30); do
+            ci_id="$(gh run list --repo "$GITHUB_REPOSITORY" --workflow ci --branch "$branch" --limit 1 --json databaseId --jq '.[0].databaseId // empty')"
+            if [ -n "$ci_id" ] && [ "$ci_id" != "$before" ]; then break; fi
+            sleep 2
+          done
+          if [ -z "$ci_id" ]; then echo "未找到 CI 运行" >&2; exit 1; fi
+
+          echo "CI 运行：$GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$ci_id"
+          gh run watch "$ci_id" --repo "$GITHUB_REPOSITORY" --exit-status --interval 15
