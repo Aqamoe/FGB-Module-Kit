@@ -37,7 +37,7 @@ jobs:
       - name: 取同步脚本
         run: |
           curl -fsSL -o sync-sdk.mjs \
-            https://raw.githubusercontent.com/Aqamoe/FGB-Module-Kit/v0.4.3/tools/sync-sdk.mjs
+            https://raw.githubusercontent.com/Aqamoe/FGB-Module-Kit/v0.4.4/tools/sync-sdk.mjs
 
       - name: 检查新版
         id: check
@@ -98,4 +98,4 @@ jobs:
           fi
 
           body=$(printf '%s\n' "FaceGaze Bridge 发布了新的 SDK，本 PR 把 sdk.lock.json 指向新版。" "" "- 合入前请确认本 PR 的 CI（构建 / 单测 / 打包 / 审计）全绿。" "- 若新 SDK 改了 ABI 或行为，请对照 docs/native-module-guide.md 调整模块。" "- 关闭本 PR 即可保持现状，锁文件不会影响主分支构建。")
-          gh pr create --title "chore: 升级 SDK 到 ${version}" --body "$body"
+          gh pr create --head "$branch" --title "chore: 升级 SDK 到 ${version}" --body "$body"
