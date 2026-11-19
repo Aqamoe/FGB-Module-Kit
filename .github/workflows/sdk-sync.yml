@@ -37,7 +37,7 @@ jobs:
       - name: 取同步脚本
         run: |
           curl -fsSL -o sync-sdk.mjs \
-            https://raw.githubusercontent.com/Aqamoe/FGB-Module-Kit/v0.4.2/tools/sync-sdk.mjs
+            https://raw.githubusercontent.com/Aqamoe/FGB-Module-Kit/v0.4.3/tools/sync-sdk.mjs
 
       - name: 检查新版
         id: check
@@ -73,14 +73,29 @@ jobs:
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git add sdk.lock.json
-          git commit -m "chore: 升级 FaceGaze Bridge SDK 到 ${version}"
+          if git diff --cached --quiet; then
+            echo "锁文件内容未变化，跳过提交"
+          else
+            git commit -m "chore: 升级 FaceGaze Bridge SDK 到 ${version}"
+          fi
 
           if git ls-remote --exit-code origin "$branch" >/dev/null 2>&1; then
-            git push -f origin "$branch"
-            echo "已更新分支 $branch"
+            git fetch origin "+refs/heads/${branch}:refs/remotes/origin/${branch}"
+            if git diff --quiet "origin/$branch" -- sdk.lock.json; then
+              echo "分支 $branch 已是目标锁文件"
+            else
+              git push -f origin "$branch"
+              echo "已更新分支 $branch"
+            fi
+          else
+            git push -u origin "$branch"
+          fi
+
+          pr="$(gh pr list --repo "$GITHUB_REPOSITORY" --head "$branch" --state open --json number --jq '.[0].number // empty')"
+          if [ -n "$pr" ]; then
+            echo "PR #$pr 已存在：$GITHUB_SERVER_URL/$GITHUB_REPOSITORY/pull/$pr"
             exit 0
           fi
-          git push -u origin "$branch"
 
           body=$(printf '%s\n' "FaceGaze Bridge 发布了新的 SDK，本 PR 把 sdk.lock.json 指向新版。" "" "- 合入前请确认本 PR 的 CI（构建 / 单测 / 打包 / 审计）全绿。" "- 若新 SDK 改了 ABI 或行为，请对照 docs/native-module-guide.md 调整模块。" "- 关闭本 PR 即可保持现状，锁文件不会影响主分支构建。")
           gh pr create --title "chore: 升级 SDK 到 ${version}" --body "$body"
