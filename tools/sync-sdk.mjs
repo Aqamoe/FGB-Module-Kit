@@ -12,7 +12,6 @@ import { resolve, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 const here = dirname(fileURLToPath(import.meta.url));
-const root = resolve(here, '..');
 const args = process.argv.slice(2);
 
 const flag = (name) => args.includes(`--${name}`);
@@ -20,6 +19,13 @@ const option = (name, fallback) => {
   const hit = args.find((a) => a.startsWith(`--${name}=`));
   return hit ? hit.slice(name.length + 3) : fallback;
 };
+
+const explicitRoot = option('root', '');
+const root = explicitRoot
+  ? resolve(explicitRoot)
+  : here.split(/[\\/]/).at(-1) === 'tools'
+    ? resolve(here, '..')
+    : process.cwd();
 
 const lockPath = resolve(root, option('lock', 'sdk.lock.json'));
 const repository = option('repo', 'Aqamoe/FaceGaze-Bridge');
@@ -94,7 +100,8 @@ if (!sha256) {
 }
 
 const current = readLock();
-const updated = !current || current.version !== version || current.sha256 !== sha256;
+// 只按版本判断：同一版本的资产即使哈希变化也不触发同步与构建。
+const updated = !current || current.version !== version;
 const next = {
   repository,
   version,
@@ -119,16 +126,26 @@ if (flag('json')) {
 console.log(
   updated
     ? `SDK 有新版：${report.current ?? '(无 lock)'} → ${version}（${release.tag_name}）`
-    : `SDK 已是最新：${version}`,
+    : `SDK 版本未变：${version}，跳过同步与构建`,
 );
 
-if (flag('write') && updated) {
-  writeLock(next);
-  console.log(`已写入 ${lockPath}`);
+if (!updated && current?.sha256 && current.sha256 !== sha256) {
+  console.warn(`注意：${version} 的 SHA256 与锁文件不一致，但版本未变，按约定跳过同步`);
 }
 
-if (updated && !flag('write')) {
+if (flag('write')) {
+  if (updated) {
+    writeLock(next);
+    console.log(`已写入 ${lockPath}`);
+  } else {
+    console.log(`版本未变，未修改 ${lockPath}`);
+  }
+  process.exit(0);
+}
+
+if (updated) {
   console.log('提示：加 --write 才会真正更新 lock 文件');
+  process.exit(3);
 }
 
-process.exit(updated ? 3 : 0);
+process.exit(0);

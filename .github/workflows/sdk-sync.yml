@@ -32,12 +32,12 @@ jobs:
 
       - uses: actions/setup-node@v4
         with:
-          node-version: "20"
+          node-version: "24"
 
       - name: 取同步脚本
         run: |
           curl -fsSL -o sync-sdk.mjs \
-            https://raw.githubusercontent.com/Aqamoe/FGB-Module-Kit/v0.1.0/tools/sync-sdk.mjs
+            https://raw.githubusercontent.com/Aqamoe/FGB-Module-Kit/v0.4.2/tools/sync-sdk.mjs
 
       - name: 检查新版
         id: check
@@ -45,7 +45,7 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           set +e
-          node sync-sdk.mjs --check --json
+          node sync-sdk.mjs --check --json --root="$GITHUB_WORKSPACE"
           code=$?
           set -e
           case "$code" in
@@ -55,13 +55,17 @@ jobs:
           esac
           node -e "console.log(JSON.stringify(JSON.parse(require('fs').readFileSync('sdk-update.json','utf8'))))" || true
 
+      - name: 版本未变，跳过同步与构建
+        if: steps.check.outputs.updated != 'true'
+        run: echo "SDK 版本未变化，跳过同步、开 PR 与构建"
+
       - name: 写锁文件并开 PR
         if: steps.check.outputs.updated == 'true'
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           set -euo pipefail
-          node sync-sdk.mjs --write
+          node sync-sdk.mjs --write --root="$GITHUB_WORKSPACE"
           version="$(node -p "JSON.parse(require('fs').readFileSync('sdk.lock.json','utf8')).version")"
           branch="${{ inputs.branch_prefix }}-${version}"
 
